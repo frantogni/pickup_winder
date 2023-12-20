@@ -1,0 +1,439 @@
+' Registro de configuración
+@ __CONFIG _CONFIG1, 0x20C4
+@ __CONFIG _CONFIG2, 0x3FFF
+
+DEFINE OSC 8
+
+' Registros
+OSCCON      = %01110101
+TRISA       = %00000001
+TRISB       = %00000001                 
+TRISC       = %00000000
+TRISD       = %00000000
+TRISE       = %00000000                 
+OPTION_REG  = %10000000        
+INTCON      = %11000000	
+IOCB        = %00000000
+PIE1        = %00000000 ; .0 ES EL TIMER1, .2 ES EL CCP1
+PIE2        = %00000000
+PIR1        = %00000000
+PIR2        = %00000000
+IOCB        = %00000001
+ANSEL       = %00000001
+ANSELH      = %00000000
+ADCON0      = %10000001
+ADCON1      = %10000000
+CM1CON0     = %00000000
+CM2CON0     = %00000000
+SRCON       = %00000000
+CCP1CON     = %00000000 ; 00001100 pwm
+CCP2CON     = %00000000
+T1CON       = %00000000
+
+' Vector de interrupcion
+on interrupt goto interrupcion
+
+' LCD
+DEFINE  LCD_DREG        PORTD
+DEFINE  LCD_DBIT        4
+DEFINE  LCD_BITS        4
+DEFINE  LCD_RSREG       PORTC
+DEFINE  LCD_RSBIT       6
+DEFINE  LCD_EREG        PORTC
+DEFINE  LCD_EBIT        7
+DEFINE  LCD_LINES       4
+DEFINE  LCD_COMMANDUS   2000  
+DEFINE  LCD_DATAUS      50
+
+' Signos de cambio de giro cgram
+LCDOUT $FE,64,$4,$2,$1F,$12,$14,$10,$10,$0
+LCDOUT $FE,72,$4,$8,$1F,$9,$5,$1,$1,$0
+lcdout $fe,80,$10,$18,$1C,$1E,$1C,$18,$10,$0
+LCDOUT $fe,88,$0,$1B,$1B,$1B,$1B,$1B,$0,$0
+lcdout $fe,96,$11,$19,$1D,$1F,$1D,$19,$11,$0
+
+
+' Asignacion I/O
+SW1 VAR PORTE.1 'Boton acceso
+SYMBOL SENTIDO = PORTD.1
+
+' Variables
+CONTADOR    var word
+VUELTAS     var WORD
+VUE_MIC     VAR WORD
+VUE_BOB     VAR BYTE
+VALOR       VAR WORD
+ULT_VAL     VAR WORD
+RAMPA       VAR BYTE
+RETARDO     VAR BYTE
+VEL_MIC     var byte
+VEL_BOB     var word
+AUX         var BYTE
+
+READ 0,VUE_MIC.BYTE0
+READ 1,VUE_MIC.BYTE1
+READ 2,VEL_MIC
+READ 3,RAMPA
+READ 4,RETARDO
+READ 5,SENTIDO
+
+' Inicio de variables
+PORTA		= 0
+PORTB		= 0
+PORTC		= 0
+PORTD       = 0
+PORTE       = 0                                                
+CCPR1H      = 0 
+CCPR1L      = 0
+VALOR       = 0       
+VUELTAS     = 0        
+    
+    PAUSE 100
+    
+'Modo de prueba sensores    
+TEST:
+    IF (SW1 = 0) THEN INICIO
+    gosub antirrebote 
+    lcdout $FE,1
+A:  gosub potenciometro 
+    lcdout $FE, $80,dec4 valor,"  ",dec portb.0 
+    IF (SW1 = 0) THEN A    
+    gosub antirrebote    
+    
+'Display menu en LCD
+INICIO:
+    lcdout $FE,1
+    lcdout $FE,$80,">       ",$fe,$c0,"       <"
+    pause 100
+    lcdout $FE,$80,"L>      ",$fe,$c0,"      <s"
+    pause 100    
+    lcdout $FE,$80,"Lu>     ",$fe,$c0,"     <as"
+    pause 100    
+    lcdout $FE,$80,"Luc>    ",$fe,$c0,"    <nas"
+    pause 100    
+    lcdout $FE,$80,"Luca>   ",$fe,$c0,"   <inas"
+    pause 100    
+    lcdout $FE,$80,"Lucas>  ",$fe,$c0,"  <binas"
+    pause 100    
+    lcdout $FE,$80,"Lucas > ",$fe,$c0," <obinas"
+    pause 100                
+    lcdout $FE,$80,"Lucas  >",$fe,$c0,"<Bobinas"
+    pause 100    
+    lcdout $FE,$80,"Lucas   ",$fe,$c0," Bobinas"    
+    pause 1000
+        
+' Menu Principal
+MAIN:    
+    lcdout $FE,1 
+    lcdout $FE,$C0,"MIC<" 
+A1: gosub potenciometro
+    select case valor
+        CASE is < 512
+            lcdout $FE,$C0,"MIC"
+            IF (SW1 = 1) THEN gosub ANTIRREBOTE : goto MICROFONO
+        CASE else
+            lcdout $FE,$C0,"BOB"
+            IF (SW1 = 1) THEN gosub ANTIRREBOTE : goto BOBINA
+        end select
+    GOTO A1
+    
+MICROFONO:
+    lcdout $FE,$C3," >"
+S:  gosub POTENCIOMETRO
+    select case valor
+        CASE is < 350
+            lcdout $FE,$C5,"INI"
+            IF (SW1 = 1) THEN gosub ANTIRREBOTE : goto INI_MIC
+        CASE is < 700
+            lcdout $FE,$C5,"CFG"
+            IF (SW1 = 1) THEN gosub ANTIRREBOTE : goto CFG_MIC
+        CASE ELSE
+            lcdout $FE,$C5,"VOL"
+            IF (SW1 = 1) THEN gosub ANTIRREBOTE : goto MAIN            
+    end select
+    GOTO S 
+    
+CFG_MIC:
+    ULT_VAL = VALOR
+    lcdout $FE,$C5,"SET",$FE,$80,"VEL: ",dec2 vel_mic,"%"
+B:  GOSUB POTENCIOMETRO
+    IF (ULT_VAL < VALOR - 2)OR(ULT_VAL > VALOR + 2) THEN
+        ULT_VAL = VALOR
+        vel_MIC = ((((valor/10)*88)/100)+10)
+        lcdout $FE,$85,dec2 vel_mic
+    ENDIF
+    IF (SW1 = 0) THEN B
+    WRITE 2,VEL_MIC
+    gosub ANTIRREBOTE    
+    ULT_VAL = VALOR
+    lcdout $FE,$80,"VUE:",dec4 VUE_MIC
+C:  GOSUB POTENCIOMETRO
+    IF (ULT_VAL < VALOR - 2)OR(ULT_VAL > VALOR + 2) THEN
+        ULT_VAL = VALOR
+        VUE_MIC = (valor*10)
+        if VUE_MIC > 9999 then VUE_MIC = 9999
+        lcdout $FE,$84,dec4 VUE_MIC
+    ENDIF
+    IF (SW1 = 0) THEN C
+    WRITE 0,VUE_MIC.BYTE0
+    WRITE 1,VUE_MIC.BYTE1
+    gosub ANTIRREBOTE
+    
+    ULT_VAL = VALOR
+    lcdout $FE,$80,"RET: ",dec2 retardo,"s "
+D:  GOSUB POTENCIOMETRO
+    IF (ULT_VAL < VALOR - 2)OR(ULT_VAL > VALOR + 2) THEN
+        ULT_VAL = VALOR
+        retardo = valor / 100                
+        lcdout $FE,$85,dec2 retardo
+    ENDIF
+    IF (SW1 = 0) THEN D
+    WRITE 4,RETARDO
+    gosub ANTIRREBOTE
+    
+    ULT_VAL = VALOR
+    lcdout $FE,$80,"RAM: ",dec2 rampa,"s "
+E:  GOSUB POTENCIOMETRO
+    IF (ULT_VAL < VALOR - 2)OR(ULT_VAL > VALOR + 2) THEN
+        ULT_VAL = VALOR
+        rampa = ((((valor/10)*29)/100)+30)               
+        lcdout $FE,$85,dec2 rampa
+    ENDIF
+    IF (SW1 = 0) THEN E
+    WRITE 3,RAMPA
+    gosub ANTIRREBOTE
+    
+    ULT_VAL = VALOR
+    lcdout $FE,$80,"SEN: ",sentido,"  "
+F:  GOSUB POTENCIOMETRO
+    IF (ULT_VAL < VALOR - 2)OR(ULT_VAL > VALOR + 2) THEN
+        ULT_VAL = VALOR
+        sentido = valor/515               
+        lcdout $FE,$85,sentido
+    ENDIF
+    IF (SW1 = 0) THEN F
+    WRITE 5,SENTIDO
+    gosub ANTIRREBOTE
+    lcdout $FE,$80,"        "    
+    goto MICROFONO    
+    
+    
+INI_MIC:
+    VUELTAS = 0
+    READ 4,RETARDO 
+    lcdout $FE,$80,dec2 vel_mic,"% ",DEC4 VUELTAS,$fe,$c4,dec4 VUE_MIC
+    PAUSE 500                       
+G:  if RETARDO = 0 then H 
+    lcdout $FE,$C0,"(",dec RETARDO,")"
+    pause 1000    
+    RETARDO = retardo - 1
+    goto G   
+H:  lcdout $FE,$C0,"MIC"     
+    GOSUB SUBE
+    contador = 500    
+I:  if contador < ((VEL_MIC * 10) + 500) then
+        contador = contador + 1
+        HPWM 1,127,contador
+        pause (rampa-26)
+        goto I
+    endif
+    GOSUB POTENCIOMETRO
+    ULT_VAL = VALOR             
+J:  gosub potenciometro
+    IF (ULT_VAL < VALOR - 2)OR(ULT_VAL > VALOR + 2) THEN
+        ULT_VAL = VALOR
+        CONTADOR = (((VALOR/10)*10)+500)
+        HPWM 1,127,CONTADOR
+        pause 10
+        VALOR = ((((valor/10)*88)/100)+10)              
+        lcdout $FE,$80,dec2 VALOR,"%"
+    ENDIF        
+    if (vueLTAS = VUE_MIC - 5) THEN 
+        GOSUB BAJA
+        GOTO K
+    ENDIF
+    IF(SW1 = 0) THEN J 
+    gosub ANTIRREBOTE
+PAUSA:
+    lcdout $FE,$C0,"(",3,")"             
+    GOSUB BAJA
+T:  GOSUB POTENCIOMETRO
+    SELECT CASE VALOR
+        CASE IS < 512
+            lcdout $FE,$C1,2
+            IF (SW1 = 1) THEN GOSUB ANTIRREBOTE : GOTO H
+        CASE ELSE
+            lcdout $FE,$C1,4
+            IF (SW1 = 1) THEN GOSUB ANTIRREBOTE : GOTO K
+    END SELECT
+    GOTO T   
+K:  
+    gosub buzzer
+    pause 2000
+    lcdout $FE,$80,"RETIRAR ",$FE,$C0,"  BOBINA"
+L:  IF SW1 = 0 THEN L
+    GOSUB ANTIRREBOTE        
+    goto MAIN               
+    
+    
+           
+BOBINA:
+    lcdout $FE,1 
+    lcdout $FE,$80,"00% 0000",$FE,$C0,"BOB >INI"
+M:  gosub potenciometro
+    vel_bob = (((valor/10)*97)/100)
+    lcdout $FE,$80,dec2 vel_bob
+    IF (SW1 = 0) THEN M
+    gosub ANTIRREBOTE
+    vel_bob = valor * 20
+    if vel_bob < 1000 then vel_bob = 1000    
+N:  gosub potenciometro
+    vue_bob = valor / 10
+    lcdout $FE,$84,dec4 vue_bob
+    IF (SW1 = 0) THEN N
+    gosub ANTIRREBOTE
+O:  GOSUB POTENCIOMETRO
+    select case valor
+        CASE is < 500
+            lcdout $FE,$C5,"INI"
+            IF (SW1 = 1) THEN gosub ANTIRREBOTE : READ 4,RETARDO : goto INI_BOB
+        CASE ELSE
+            lcdout $FE,$C5,"VOL"
+            IF (SW1 = 1) THEN gosub ANTIRREBOTE : goto MAIN            
+    end select
+    goto O
+    
+INI_BOB:
+    if RETARDO = 0 then P 
+    lcdout $FE,$C0,"(",dec RETARDO,")"
+    pause 1000    
+    RETARDO = retardo - 1
+    goto INI_BOB
+P:  lcdout $FE,$C0,"BOB >FIN"
+    CCP1CON = %00000000
+    INTCON.4 = 0    
+    aux = 0             
+    CONTADOR = 20000  
+Q: TOGGLE PORTC.2
+    PAUSEUS CONTADOR
+    if contador > vel_bob THEN
+        contador = contador - 2
+        if contador > 5000 then 
+            contador = contador - 10
+            if contador > 10000 then contador = contador - 50
+        ENDIF
+    ENDIF
+    if portc.2 = 1 then aux = aux + 1
+    if aux = 200 then vue_bob = vue_bob - 1 : aux = 0
+    if vue_bob = 0 then R    
+    IF (SW1 = 0) THEN Q           
+R:  TOGGLE PORTC.2
+    PAUSEUS CONTADOR     
+    contador = contador + 1
+    if contador > 2500 then 
+        contador = contador + 10
+        if contador => 10000 then 
+            gosub ANTIRREBOTE
+            lcdout $fe,$c0,"FINALIZO"
+            pause 2000            
+            goto BOBINA
+        endif                       
+    ENDIF            
+    goto R                                                            
+           
+'----------    
+'Subrutinas
+'----------
+
+' Rampa Subida
+SUBE:
+    CCP1CON = %00000000 
+    CONTADOR = 15000  
+Y1: TOGGLE PORTC.2
+    PAUSEUS CONTADOR
+    if contador > 1000 THEN
+        contador = contador - 2
+        if contador > 5000 then 
+            contador = contador - 10
+            if contador > 10000 then contador = contador - 50
+        ENDIF
+        GOTO Y1
+    ENDIF    
+    CCP1CON = %00001100
+    VUELTAS = VUELTAS + 5
+    INTCON.4 = 1
+    hpwm 1,127,500     
+    return
+    
+' Rampa Bajada
+BAJA:
+Z1: IF CONTADOR > 500 THEN 
+        CONTADOR = CONTADOR - 1
+        hpwm 1,127,CONTADOR
+        PAUSE (rampa-26)
+        GOTO Z1
+    ENDIF
+    toggle porta.7
+    CCP1CON = %00000000
+    INTCON.4 = 0    
+    CONTADOR = 1000
+Z2: TOGGLE PORTC.2
+    PAUSEUS CONTADOR     
+    if contador => 1000 THEN
+        contador = contador + 1
+        if contador > 2500 then 
+            contador = contador + 10
+            if contador => 5000 then 
+                VUELTAS = VUELTAS + 5
+                lcdout $FE,$84,DEC4 VUELTAS                
+                return
+            ENDIF
+        ENDIF
+        GOTO z2
+    ENDIF                     
+
+' Rutina Antirrebote de botones
+ANTIRREBOTE:
+    IF (SW1 = 1) then PAUSE 100 : GOTO ANTIRREBOTE
+    return
+
+' Rutina Lectura Potenciómetro    
+POTENCIOMETRO:                         
+    ADRESH      = 0
+    ADRESL      = 0                
+    ADCON0.1    = 1    
+LEC:if PIR1.6 = 0 then LEC
+    PIR1.6 = 0    
+    VALOR = ADRESL + (255 * ADRESH)
+    RETURN
+    
+buzzer:    
+    sound porta.1,[114,8]
+    pause 50
+    sound porta.1,[114,8]
+    pause 200
+    sound porta.1,[114,8]
+    pause 200
+    sound porta.1,[110,8]         
+    pause 50
+    sound porta.1,[114,8]
+    pause 200
+    sound porta.1,[116,8]
+    return            
+                  
+' Rutina de Interrupción        
+disable    
+INTERRUPCION:
+    if INTCON.1 = 1 THEN
+        VUELTAS = VUELTAS + 1
+        lcdout $FE,$84,DEC4 VUELTAS 
+ESPERA: IF PORTB.0 = 1 THEN 
+            PAUSE 10
+            GOTO ESPERA
+        ENDIF                 
+        INTCON.1 = 0
+    ENDIF                                                   				                                                            
+RESUME
+ENABLE           
+
+END                       
